@@ -1,0 +1,7 @@
+{
+  "Records": [
+    {
+      "body": "{\"Message\":\"{\\\"appointmentId\\\":\\\"test-123\\\",\\\"insuredId\\\":\\\"00001\\\",\\\"scheduleId\\\":123,\\\"countryISO\\\":\\\"PE\\\"}\"}"
+    }
+  ]
+}

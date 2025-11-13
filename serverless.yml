@@ -1,0 +1,369 @@
+service: rimac-appointments
+frameworkVersion: "3"
+configValidationMode: error
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: us-east-1
+  stage: dev
+  profile: rimac-dev
+  memorySize: 256
+  timeout: 20
+  environment:
+    TABLE_NAME: ${self:service}-appointments-${self:provider.stage}
+    TOPIC_ARN: { Ref: AppointmentsTopic }
+    EVENT_BUS_NAME: ${self:service}-bus-${self:provider.stage}
+    MYSQL_SECRET_ARN: arn:aws:secretsmanager:us-east-1:935244547013:secret:rimac/dev/mysql-1oiqkn
+    MYSQL_DB: appointments
+  iam:
+    role:
+      statements:
+        # DynamoDB
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:Query
+            - dynamodb:GetItem
+          Resource:
+            - { "Fn::GetAtt": [AppointmentsTable, Arn] }
+            - {
+                "Fn::Join":
+                  [
+                    "",
+                    [{ "Fn::GetAtt": [AppointmentsTable, Arn] }, "/index/*"],
+                  ],
+              }
+
+        # SNS publish
+        - Effect: Allow
+          Action: [sns:Publish]
+          Resource: { Ref: AppointmentsTopic }
+
+        # SQS client permissions
+        - Effect: Allow
+          Action:
+            - sqs:SendMessage
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+          Resource:
+            - { "Fn::GetAtt": [QueuePE, Arn] }
+            - { "Fn::GetAtt": [QueueCL, Arn] }
+            - { "Fn::GetAtt": [QueueConfirmed, Arn] }
+
+        # EventBridge
+        - Effect: Allow
+          Action: [events:PutEvents]
+          Resource: "*"
+
+        # Secrets Manager
+        - Effect: Allow
+          Action: [secretsmanager:GetSecretValue]
+          Resource: ${self:provider.environment.MYSQL_SECRET_ARN}
+
+        # Lambda en VPC: manejo de ENIs
+        - Effect: Allow
+          Action:
+            - ec2:CreateNetworkInterface
+            - ec2:DescribeNetworkInterfaces
+            - ec2:DeleteNetworkInterface
+            - ec2:AssignPrivateIpAddresses
+            - ec2:UnassignPrivateIpAddresses
+          Resource: "*"
+
+  # VPC: usar el SG de Lambda y las 2 subnets donde corre
+  vpc:
+    securityGroupIds:
+      - { Ref: LambdaSecurityGroup } # SG de Lambda (definido en resources)
+    subnetIds:
+      - subnet-0ad08093fa9607012 # us-east-1a
+      - subnet-013a8a1adbe3f2b89 # us-east-1f
+
+plugins:
+  - serverless-esbuild
+  - serverless-offline
+  - serverless-dotenv-plugin
+
+package:
+  individually: true
+
+custom:
+  esbuild:
+    bundle: true
+    minify: false
+    sourcemap: true
+    target: node20
+    platform: node
+    format: cjs
+    external: [aws-sdk] # Excluir SDK v2. Los @aws-sdk/* (v3) se empaquetan.
+  dotenv:
+    path: .env.${opt:stage, 'local'}
+    include:
+      - NODE_ENV
+      - APP_REGION
+      - USE_IN_MEMORY
+
+functions:
+  appointmentApi:
+    handler: src/lambdas/appointment_api.handler
+    events:
+      - httpApi:
+          method: POST
+          path: /appointments
+      - httpApi:
+          method: GET
+          path: /appointments/{insuredId}
+
+  appointmentConfirm:
+    handler: src/lambdas/appointment_confirm.handler
+    events:
+      - sqs:
+          arn: { "Fn::GetAtt": [QueueConfirmed, Arn] }
+
+  appointmentPE:
+    handler: src/lambdas/appointment_pe.handler
+    events:
+      - sqs:
+          arn: { "Fn::GetAtt": [QueuePE, Arn] }
+
+  appointmentCL:
+    handler: src/lambdas/appointment_cl.handler
+    events:
+      - sqs:
+          arn: { "Fn::GetAtt": [QueueCL, Arn] }
+
+  netDiag:
+    handler: src/lambdas/net_diag.handler
+    timeout: 30
+    # No definas VPC aquí si ya la tienes en provider.vpc; heredará la misma VPC/SG/Subnets
+    events:
+      - httpApi:
+          method: GET
+          path: /net-diag
+resources:
+  Resources:
+    # --------- Networking (Security Groups) ----------
+    # SG exclusivo para Lambdas (egress abierto)
+    LambdaSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Security group for Lambda functions to access RDS
+        VpcId: vpc-02f4572d49646cc58
+        SecurityGroupIngress: [] # Lambdas no requieren inbound
+        SecurityGroupEgress:
+          - IpProtocol: -1
+            CidrIp: 0.0.0.0/0
+        Tags:
+          - Key: Name
+            Value: rimac-lambda-sg
+
+    # Permite que el RDS (SG existente) reciba 3306 desde el SG de Lambda
+    AllowLambdaToRDSIngress:
+      Type: AWS::EC2::SecurityGroupIngress
+      Properties:
+        GroupId: sg-0d49ca64324b0d9ac # SG del RDS (existente en tu cuenta)
+        IpProtocol: tcp
+        FromPort: 3306
+        ToPort: 3306
+        SourceSecurityGroupId: { Ref: LambdaSecurityGroup }
+
+      # SG para el Endpoint de Secrets Manager (permite 443 desde la Lambda)
+
+    SecretsManagerEndpointSG:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: SG for Secrets Manager VPC Endpoint
+        VpcId: vpc-02f4572d49646cc58
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            SourceSecurityGroupId: { Ref: LambdaSecurityGroup }
+        SecurityGroupEgress:
+          - IpProtocol: -1
+            CidrIp: 0.0.0.0/0
+        Tags:
+          - Key: Name
+            Value: rimac-sm-endpoint-sg
+
+    # Interface Endpoint para Secrets Manager (en las MISMAS subnets de la Lambda)
+    SecretsManagerEndpoint:
+      Type: AWS::EC2::VPCEndpoint
+      Properties:
+        VpcId: vpc-02f4572d49646cc58
+        ServiceName: com.amazonaws.us-east-1.secretsmanager
+        VpcEndpointType: Interface
+        PrivateDnsEnabled: true
+        SubnetIds:
+          - subnet-0ad08093fa9607012 # 1a
+          - subnet-013a8a1adbe3f2b89 # 1f
+        SecurityGroupIds:
+          - { Ref: SecretsManagerEndpointSG }
+        # Política abierta (ajústala si quieres limitar)
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal: "*"
+              Action: "secretsmanager:*"
+              Resource: "*"
+
+    # ------------------- DynamoDB --------------------
+    AppointmentsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.TABLE_NAME}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: appointmentId
+            AttributeType: S
+          - AttributeName: insuredId
+            AttributeType: S
+          - AttributeName: createdAt
+            AttributeType: S
+        KeySchema:
+          - AttributeName: appointmentId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: insuredId-createdAt-index
+            KeySchema:
+              - AttributeName: insuredId
+                KeyType: HASH
+              - AttributeName: createdAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+    # -------------------- SNS ------------------------
+    AppointmentsTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: ${self:service}-topic-${self:provider.stage}
+
+    # --------------------- SQS -----------------------
+    QueuePE:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-sqs-pe-${self:provider.stage}
+
+    QueueCL:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-sqs-cl-${self:provider.stage}
+
+    QueueConfirmed:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-sqs-confirmed-${self:provider.stage}
+
+    # SNS → SQS subscriptions (filtros por país)
+    TopicSubscriptionPE:
+      Type: AWS::SNS::Subscription
+      Properties:
+        TopicArn: { Ref: AppointmentsTopic }
+        Protocol: sqs
+        Endpoint: { "Fn::GetAtt": [QueuePE, Arn] }
+        FilterPolicy:
+          countryISO: ["PE"]
+
+    TopicSubscriptionCL:
+      Type: AWS::SNS::Subscription
+      Properties:
+        TopicArn: { Ref: AppointmentsTopic }
+        Protocol: sqs
+        Endpoint: { "Fn::GetAtt": [QueueCL, Arn] }
+        FilterPolicy:
+          countryISO: ["CL"]
+
+    # Permisos para que SNS envíe a SQS
+    AllowSNSToSendToSQSPE:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues: [{ Ref: QueuePE }]
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Sid: Allow-SNS-PE
+              Effect: Allow
+              Principal: "*"
+              Action: sqs:SendMessage
+              Resource: { "Fn::GetAtt": [QueuePE, Arn] }
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: { Ref: AppointmentsTopic }
+
+    AllowSNSToSendToSQSCL:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues: [{ Ref: QueueCL }]
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Sid: Allow-SNS-CL
+              Effect: Allow
+              Principal: "*"
+              Action: sqs:SendMessage
+              Resource: { "Fn::GetAtt": [QueueCL, Arn] }
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: { Ref: AppointmentsTopic }
+
+    # ---------------- EventBridge --------------------
+    EventBus:
+      Type: AWS::Events::EventBus
+      Properties:
+        Name: ${self:provider.environment.EVENT_BUS_NAME}
+
+    # Regla: eventos de confirmación → QueueConfirmed
+    EventToConfirmedQueueRule:
+      Type: AWS::Events::Rule
+      Properties:
+        EventBusName: ${self:provider.environment.EVENT_BUS_NAME}
+        EventPattern:
+          source: ["rimac.appointments"]
+          detail-type: ["AppointmentConfirmed"]
+        Targets:
+          - Arn: { "Fn::GetAtt": [QueueConfirmed, Arn] }
+            Id: SendToConfirmedQueue
+
+    # Permiso para que EventBridge publique en QueueConfirmed
+    AllowEventBridgeToSendToSQSConfirmed:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - { Ref: QueueConfirmed }
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Sid: Allow-EventBridge-Confirmed
+              Effect: Allow
+              Principal:
+                Service: events.amazonaws.com
+              Action: sqs:SendMessage
+              Resource: { "Fn::GetAtt": [QueueConfirmed, Arn] }
+              Condition:
+                ArnEquals:
+                  # Usa el ARN de la regla o del bus. Lo más estricto es la Regla:
+                  aws:SourceArn:
+                    Fn::Join:
+                      - ""
+                      - - "arn:aws:events:"
+                        - ${self:provider.region}
+                        - ":"
+                        - ${aws:accountId}
+                        - ":rule/"
+                        - ${self:service}-${self:provider.stage}-EventToConfirmedQueueRule
+
+  Outputs:
+    LambdaSecurityGroupId:
+      Value: { Ref: LambdaSecurityGroup }
+    TopicArn:
+      Value: { Ref: AppointmentsTopic }
+    QueuePEArn:
+      Value: { "Fn::GetAtt": [QueuePE, Arn] }
+    QueueCLArn:
+      Value: { "Fn::GetAtt": [QueueCL, Arn] }
+    QueueConfirmedArn:
+      Value: { "Fn::GetAtt": [QueueConfirmed, Arn] }

@@ -1,0 +1,39 @@
+{
+  "name": "rimac-appointments",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "serverless offline --stage local",
+    "deploy": "serverless deploy --stage dev",
+    "remove": "serverless remove --stage dev",
+    "print": "serverless print --stage dev"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.930.0",
+    "@aws-sdk/client-eventbridge": "^3.930.0",
+    "@aws-sdk/client-secrets-manager": "^3.930.0",
+    "@aws-sdk/client-sns": "^3.930.0",
+    "@aws-sdk/client-sqs": "^3.930.0",
+    "@aws-sdk/lib-dynamodb": "^3.930.0",
+    "aws-sdk": "^2.1692.0",
+    "mysql2": "^3.15.3",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.158",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.10.1",
+    "jest": "^30.2.0",
+    "serverless": "^3.40.0",
+    "serverless-dotenv-plugin": "^6.0.0",
+    "serverless-esbuild": "^1.55.1",
+    "serverless-offline": "^13.9.0",
+    "ts-jest": "^29.4.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
