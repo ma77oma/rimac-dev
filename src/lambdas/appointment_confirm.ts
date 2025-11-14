@@ -4,12 +4,17 @@ import { DynamoAppointmentRepository } from "../infrastructure/dynamo/DynamoAppo
 const repo = new DynamoAppointmentRepository();
 
 export const handler: SQSHandler = async (event) => {
-  console.log("[CONFIRM] start", { records: event.Records.length });
+  const records = event.Records ?? [];
+
+  console.log("[CONFIRM] start", { records: records.length });
 
   for (const rec of event.Records) {
     console.log("[CONFIRM] raw record body:", rec.body);
 
     const body = JSON.parse(rec.body);
+
+    console.log("[CONFIRM] raw  body:", body);
+
     const detail = body?.detail || {};
     const id = detail.appointmentId;
 
