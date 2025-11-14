@@ -1,16 +1,8 @@
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
-import { AppointmentService } from "../application/AppointmentService";
-import { SnsPublisher } from "../infrastructure/sns/SnsPublisher";
-import { DynamoAppointmentRepository } from "../infrastructure/dynamo/DynamoAppointmentRepository";
-import { InMemoryAppointmentRepository } from "../infrastructure/memory/InMemoryAppointmentRepository";
-import { NoopPublisher } from "../infrastructure/memory/NoopPublisher";
+import { ServiceFactory } from "../infrastructure/factories/ServiceFactory";
+import { CreateAppointmentRequest } from "../application/dtos/CreateAppointmentRequest";
 
-const isOffline = process.env.IS_OFFLINE === "true";
-
-const repo = isOffline ? new InMemoryAppointmentRepository() : new DynamoAppointmentRepository();
-const pub  = isOffline ? new NoopPublisher() : new SnsPublisher();
-
-const service = new AppointmentService(repo as any, pub as any);
+const service = ServiceFactory.createAppointmentService();
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
   const method = event.requestContext?.http?.method;
@@ -29,10 +21,16 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     if (method === "POST") {
       console.log("appointmentApi:POST:body", event.body);
       const body = JSON.parse(event.body || "{}");
-      const { insuredId, scheduleId, countryISO } = body;
+      
+      // Mapear request HTTP a DTO de aplicación
+      const request: CreateAppointmentRequest = {
+        insuredId: body.insuredId,
+        scheduleId: Number(body.scheduleId),
+        countryISO: body.countryISO,
+      };
 
-      console.log("appointmentApi:POST:create:before", { insuredId, scheduleId, countryISO });
-      const res = await service.create(insuredId, Number(scheduleId), countryISO);
+      console.log("appointmentApi:POST:create:before", request);
+      const res = await service.create(request);
       console.log("appointmentApi:POST:create:ok", res);
 
       return { statusCode: 202, body: JSON.stringify(res) };
@@ -41,7 +39,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     if (method === "GET") {
       const insuredId = event.pathParameters?.insuredId!;
       console.log("appointmentApi:GET:list:before", { insuredId });
-      const items = await service.list(insuredId);
+      const items = await service.listByInsured(insuredId);
       console.log("appointmentApi:GET:list:ok", { count: items?.length });
 
       return { statusCode: 200, body: JSON.stringify(items) };

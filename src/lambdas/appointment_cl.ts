@@ -1,9 +1,10 @@
 import { SQSHandler } from "aws-lambda";
 import { MySqlAppointmentRepository } from "../infrastructure/mysql/MySqlAppointmentRepository";
-import { EventBridgePublisher } from "../infrastructure/eventbridge/EventBridgePublisher";
+import { EventPublisherFactory } from "../infrastructure/factories/EventPublisherFactory";
 
-const repo = new MySqlAppointmentRepository();
-const eb = new EventBridgePublisher();
+
+const repository = new MySqlAppointmentRepository();
+const eventPublisher = EventPublisherFactory.create();
 
 export const handler: SQSHandler = async (event) => {
   for (const rec of event.Records) {
@@ -12,7 +13,7 @@ export const handler: SQSHandler = async (event) => {
     const msg = typeof outer.Message === "string" ? JSON.parse(outer.Message) : outer.Message;
 
     // msg debe contener: appointmentId, insuredId, scheduleId, countryISO
-    await repo.save({
+    await repository.save({
       appointmentId: msg.appointmentId,
       insuredId: msg.insuredId,
       scheduleId: Number(msg.scheduleId),
@@ -20,6 +21,6 @@ export const handler: SQSHandler = async (event) => {
     });
 
     // 5) Enviar conformidad
-    await eb.publishConfirmed({ appointmentId: msg.appointmentId });
+    await eventPublisher.publishConfirmed({ appointmentId: msg.appointmentId });
   }
 };

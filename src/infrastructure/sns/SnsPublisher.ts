@@ -1,8 +1,9 @@
 import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
 import { Appointment } from "../../domain/Appointment";
-import { IMessagePublisher } from "../../application/AppointmentService";
+import { IMessagePublisher } from "../../domain/publishers/IMessagePublisher";
 
 const TOPIC_ARN = process.env.TOPIC_ARN!;
+
 
 export class SnsPublisher implements IMessagePublisher {
   private sns = new SNSClient({});

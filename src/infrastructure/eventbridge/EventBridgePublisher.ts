@@ -5,9 +5,10 @@ import {
   PutEventsRequestEntry,
 } from "@aws-sdk/client-eventbridge";
 
-type ConfirmDetail = { appointmentId: string };
+import { IEventPublisher } from "../../domain/publishers/IEventPublisher";
 
-export class EventBridgePublisher {
+
+export class EventBridgePublisher implements IEventPublisher {
   private eb: EventBridgeClient;
   private bus: string;
 
@@ -26,12 +27,16 @@ export class EventBridgePublisher {
    * Retorna info útil para saber si falló o no.
    */
   async publishConfirmed(
-    detail: ConfirmDetail,
+    detail: { appointmentId: string },
     opts?: { correlationId?: string }
   ): Promise<{
     ok: boolean;
     failed: number;
-    entries?: PutEventsCommandOutput["Entries"];
+    entries?: Array<{
+      EventId?: string;
+      ErrorCode?: string;
+      ErrorMessage?: string;
+    }>;
   }> {
     const correlationId =
       opts?.correlationId || `${detail.appointmentId}-${Date.now()}`;

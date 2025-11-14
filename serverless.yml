@@ -7,7 +7,7 @@ provider:
   runtime: nodejs20.x
   region: us-east-1
   stage: dev
-  profile: rimac-dev
+  profile: mi-perfil
   memorySize: 256
   timeout: 20
   environment:
@@ -73,14 +73,6 @@ provider:
             - ec2:UnassignPrivateIpAddresses
           Resource: "*"
 
-  # VPC: usar el SG de Lambda y las 2 subnets donde corre
-  vpc:
-    securityGroupIds:
-      - { Ref: LambdaSecurityGroup } # SG de Lambda (definido en resources)
-    subnetIds:
-      - subnet-0ad08093fa9607012 # us-east-1a
-      - subnet-013a8a1adbe3f2b89 # us-east-1f
-
 plugins:
   - serverless-esbuild
   - serverless-offline
@@ -108,6 +100,7 @@ custom:
 functions:
   appointmentApi:
     handler: src/lambdas/appointment_api.handler
+    # Sin VPC: solo usa DynamoDB y SNS (servicios públicos)
     events:
       - httpApi:
           method: POST
@@ -118,18 +111,33 @@ functions:
 
   appointmentConfirm:
     handler: src/lambdas/appointment_confirm.handler
+    # Sin VPC: solo usa DynamoDB (servicio público), puede acceder a SQS sin VPC Endpoint
     events:
       - sqs:
           arn: { "Fn::GetAtt": [QueueConfirmed, Arn] }
 
   appointmentPE:
     handler: src/lambdas/appointment_pe.handler
+    # EN VPC: necesita acceder a MySQL que está en VPC
+    vpc:
+      securityGroupIds:
+        - { Ref: LambdaSecurityGroup }
+      subnetIds:
+        - subnet-0ad08093fa9607012 # us-east-1a
+        - subnet-013a8a1adbe3f2b89 # us-east-1f
     events:
       - sqs:
           arn: { "Fn::GetAtt": [QueuePE, Arn] }
 
   appointmentCL:
     handler: src/lambdas/appointment_cl.handler
+    # EN VPC: necesita acceder a MySQL que está en VPC
+    vpc:
+      securityGroupIds:
+        - { Ref: LambdaSecurityGroup }
+      subnetIds:
+        - subnet-0ad08093fa9607012 # us-east-1a
+        - subnet-013a8a1adbe3f2b89 # us-east-1f
     events:
       - sqs:
           arn: { "Fn::GetAtt": [QueueCL, Arn] }
@@ -137,7 +145,8 @@ functions:
   netDiag:
     handler: src/lambdas/net_diag.handler
     timeout: 30
-    # No definas VPC aquí si ya la tienes en provider.vpc; heredará la misma VPC/SG/Subnets
+    # Sin VPC: solo para diagnóstico de red
+    # Timeout en 30s (máximo permitido por HTTP API)
     events:
       - httpApi:
           method: GET
@@ -209,6 +218,7 @@ resources:
               Principal: "*"
               Action: "secretsmanager:*"
               Resource: "*"
+
 
     # ------------------- DynamoDB --------------------
     AppointmentsTable:
@@ -344,8 +354,8 @@ resources:
               Action: sqs:SendMessage
               Resource: { "Fn::GetAtt": [QueueConfirmed, Arn] }
               Condition:
-                ArnEquals:
-                  # Usa el ARN de la regla o del bus. Lo más estricto es la Regla:
+                StringLike:
+                  # Usa el ARN completo de la regla incluyendo el EventBus y wildcard para el hash
                   aws:SourceArn:
                     Fn::Join:
                       - ""
@@ -354,7 +364,10 @@ resources:
                         - ":"
                         - ${aws:accountId}
                         - ":rule/"
+                        - ${self:provider.environment.EVENT_BUS_NAME}
+                        - "/"
                         - ${self:service}-${self:provider.stage}-EventToConfirmedQueueRule
+                        - "*"  # Wildcard para el hash que CloudFormation agrega
 
   Outputs:
     LambdaSecurityGroupId:

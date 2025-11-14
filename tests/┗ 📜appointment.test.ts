@@ -1,12 +1,13 @@
 import {
   AppointmentService,
-  IAppointmentRepo,
-  IMessagePublisher,
+ 
 } from "../src/application/AppointmentService";
+import { IMessagePublisher } from "../src/domain/publishers/IMessagePublisher";
+import { IAppointmentRepository } from "../src/domain/repositories/IAppointmentRepository";
 
 test("crea cita en pending y publica evento", async () => {
   const saved: any[] = [];
-  const repo: IAppointmentRepo = {
+  const repo: IAppointmentRepository = {
     savePending: async (a) => void saved.push(a),
     listByInsured: async () => [],
     markCompleted: async () => {},

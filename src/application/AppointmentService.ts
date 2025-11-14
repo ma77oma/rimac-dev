@@ -1,48 +1,42 @@
 import { v4 as uuidv4 } from "uuid";
 import { Appointment } from "../domain/Appointment";
+import { IAppointmentRepository } from "../domain/repositories/IAppointmentRepository";
+import { IMessagePublisher } from "../domain/publishers/IMessagePublisher";
+import { CreateAppointmentRequest, CreateAppointmentResponse } from "./dtos/CreateAppointmentRequest";
 
-export interface IAppointmentRepo {
-  savePending(app: Appointment): Promise<void>;
-  listByInsured(insuredId: string): Promise<Appointment[]>;
-  markCompleted(appointmentId: string): Promise<void>;
-}
-
-export interface IMessagePublisher {
-  publishAppointmentRequested(app: Appointment): Promise<void>;
-}
 
 export class AppointmentService {
   constructor(
-    private repo: IAppointmentRepo,
-    private publisher: IMessagePublisher
+    private repository: IAppointmentRepository,
+    private messagePublisher: IMessagePublisher
   ) {}
 
-  async create(insuredId: string, scheduleId: number, countryISO: "PE" | "CL") {
-    if (!/^\d{5}$/.test(insuredId)) {
+
+  async create(request: CreateAppointmentRequest): Promise<CreateAppointmentResponse> {
+    if (!/^\d{5}$/.test(request.insuredId)) {
       throw new Error("insuredId debe tener 5 dígitos");
     }
 
     const appointment: Appointment = {
       appointmentId: uuidv4(),
-      insuredId,
-      scheduleId,
-      countryISO,
+      insuredId: request.insuredId,
+      scheduleId: request.scheduleId,
+      countryISO: request.countryISO,
       status: "pending",
       createdAt: new Date().toISOString(),
     };
 
     console.log("[SERVICE] Guardando pending en repo...", {
-      insuredId,
-      scheduleId,
-      countryISO,
+      insuredId: request.insuredId,
+      scheduleId: request.scheduleId,
+      countryISO: request.countryISO,
     });
-    await this.repo.savePending(appointment);
-    console.log("[SERVICE] Guardado OK en Dynamo");
+    await this.repository.savePending(appointment);
+    console.log("[SERVICE] Guardado OK");
 
-    // ⬇️ NO dejes que SNS rompa la API
     try {
       console.log("[SERVICE] Publicando en SNS...");
-      await this.publisher.publishAppointmentRequested(appointment);
+      await this.messagePublisher.publishAppointmentRequested(appointment);
       console.log("[SERVICE] SNS publish OK");
     } catch (err: any) {
       console.error(
@@ -58,11 +52,11 @@ export class AppointmentService {
     };
   }
 
-  async list(insuredId: string) {
-    return this.repo.listByInsured(insuredId);
+  async listByInsured(insuredId: string): Promise<Appointment[]> {
+    return this.repository.listByInsured(insuredId);
   }
 
-  async complete(appointmentId: string) {
-    await this.repo.markCompleted(appointmentId);
+  async markAsCompleted(appointmentId: string): Promise<void> {
+    await this.repository.markCompleted(appointmentId);
   }
 }

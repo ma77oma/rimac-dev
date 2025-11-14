@@ -1,5 +1,6 @@
 import { Appointment } from "../../domain/Appointment";
-import { IMessagePublisher } from "../../application/AppointmentService";
+import { IMessagePublisher } from "../../domain/publishers/IMessagePublisher";
+
 
 export class NoopPublisher implements IMessagePublisher {
   async publishAppointmentRequested(_app: Appointment): Promise<void> {

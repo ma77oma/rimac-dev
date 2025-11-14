@@ -1,9 +1,10 @@
 import { Appointment } from "../../domain/Appointment";
-import { IAppointmentRepo } from "../../application/AppointmentService";
+import { IAppointmentRepository } from "../../domain/repositories/IAppointmentRepository";
 
 const db: Record<string, Appointment> = {};
 
-export class InMemoryAppointmentRepository implements IAppointmentRepo {
+
+export class InMemoryAppointmentRepository implements IAppointmentRepository {
   async savePending(app: Appointment): Promise<void> {
     db[app.appointmentId] = app;
   }

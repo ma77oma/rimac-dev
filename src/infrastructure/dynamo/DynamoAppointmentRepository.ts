@@ -6,7 +6,7 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { Appointment } from "../../domain/Appointment";
-import { IAppointmentRepo } from "../../application/AppointmentService";
+import { IAppointmentRepository } from "../../domain/repositories/IAppointmentRepository";
 
 const REGION = process.env.AWS_REGION || "us-east-1";
 const TABLE_NAME = process.env.TABLE_NAME!;
@@ -32,7 +32,8 @@ rawClient.middlewareStack.add(
 
 const ddb = DynamoDBDocumentClient.from(rawClient);
 
-export class DynamoAppointmentRepository implements IAppointmentRepo {
+
+export class DynamoAppointmentRepository implements IAppointmentRepository {
   async savePending(app: Appointment): Promise<void> {
     console.log("savePending:start", { TABLE_NAME, pk: app.appointmentId });
     try {

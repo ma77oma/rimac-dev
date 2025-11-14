@@ -1,7 +1,8 @@
 import { SQSHandler } from "aws-lambda";
-import { DynamoAppointmentRepository } from "../infrastructure/dynamo/DynamoAppointmentRepository";
+import { RepositoryFactory } from "../infrastructure/factories/RepositoryFactory";
 
-const repo = new DynamoAppointmentRepository();
+
+const repository = RepositoryFactory.create();
 
 export const handler: SQSHandler = async (event) => {
   const records = event.Records ?? [];
@@ -24,7 +25,7 @@ export const handler: SQSHandler = async (event) => {
     }
 
     console.log("[CONFIRM] markCompleted:before", { appointmentId: id });
-    await repo.markCompleted(id);
+    await repository.markCompleted(id);
     console.log("[CONFIRM] markCompleted:ok", { appointmentId: id });
   }
 

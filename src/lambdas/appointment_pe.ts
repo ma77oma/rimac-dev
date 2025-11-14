@@ -1,9 +1,10 @@
 import { SQSHandler } from "aws-lambda";
 import { MySqlAppointmentRepository } from "../infrastructure/mysql/MySqlAppointmentRepository";
-import { EventBridgePublisher } from "../infrastructure/eventbridge/EventBridgePublisher";
+import { EventPublisherFactory } from "../infrastructure/factories/EventPublisherFactory";
 
-const repo = new MySqlAppointmentRepository();
-const eb = new EventBridgePublisher();
+
+const repository = new MySqlAppointmentRepository();
+const eventPublisher = EventPublisherFactory.create();
 
 export const handler: SQSHandler = async (event) => {
   const records = event.Records ?? [];
@@ -21,7 +22,7 @@ export const handler: SQSHandler = async (event) => {
       console.log("appointmentPE:save:before", {
         appointmentId: msg.appointmentId,
       });
-      await repo.save({
+      await repository.save({
         appointmentId: msg.appointmentId,
         insuredId: msg.insuredId,
         scheduleId: Number(msg.scheduleId),
@@ -34,7 +35,7 @@ export const handler: SQSHandler = async (event) => {
 
       console.log("appointmentPE:publishConfirmed:before");
 
-      await eb.publishConfirmed({ appointmentId: msg.appointmentId });
+      await eventPublisher.publishConfirmed({ appointmentId: msg.appointmentId });
 
       console.log("appointmentPE:publishConfirmed:ok");
     } catch (e: any) {
