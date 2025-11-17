@@ -1,0 +1,26 @@
+openapi: 3.0.0
+components:
+  schemas: {}
+  securitySchemes: {}
+info:
+  title: ''
+  description: ''
+  version: ea187fdf-47ed-4bef-8ce4-796b72d80af0
+paths:
+  //appointments:
+    post:
+      operationId: appointmentApi
+      summary: Crear una cita (se guarda en pending y publica evento)
+      description: >-
+        Recibe insuredId, scheduleId y countryISO. Guarda en Dynamo y publica
+        evento.
+      tags:
+        - Appointments
+      responses: {}
+  '//appointments/{insuredId}':
+    get:
+      operationId: appointmentApi
+      summary: Listar citas por insuredId
+      tags:
+        - Appointments
+      responses: {}

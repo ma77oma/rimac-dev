@@ -1,13 +1,13 @@
 service: rimac-appointments
 frameworkVersion: "3"
-configValidationMode: error
+configValidationMode: off
 
 provider:
   name: aws
   runtime: nodejs20.x
   region: us-east-1
   stage: dev
-  profile: mi-perfil
+  profile: rimac-dev
   memorySize: 256
   timeout: 20
   environment:
@@ -74,6 +74,7 @@ provider:
           Resource: "*"
 
 plugins:
+  - serverless-openapi-documentation
   - serverless-esbuild
   - serverless-offline
   - serverless-dotenv-plugin
@@ -96,18 +97,108 @@ custom:
       - NODE_ENV
       - APP_REGION
       - USE_IN_MEMORY
-
+  documentation:
+    api:
+      info:
+        title: Rimac Appointments API
+        version: "1.0.0"
+        description: API para el flujo de agendamiento (Lambdas + SNS/SQS/Dynamo/MySQL/EventBridge)
+    components:
+      schemas:
+        NewAppointment:
+          type: object
+          required:
+            - insuredId
+            - scheduleId
+            - countryISO
+          properties:
+            insuredId:
+              type: string
+              example: "00045"
+              description: "Identificador del asegurado (5 dígitos)"
+            scheduleId:
+              type: integer
+              example: 123
+            countryISO:
+              type: string
+              example: "PE"
+        Appointment:
+          type: object
+          properties:
+            appointmentId:
+              type: string
+            insuredId:
+              type: string
+            scheduleId:
+              type: integer
+            countryISO:
+              type: string
+            status:
+              type: string
+              example: pending
+            createdAt:
+              type: string
+              format: date-time
+        AppointmentCreatedResponse:
+          type: object
+          properties:
+            appointmentId:
+              type: string
+            message:
+              type: string
+    # opcional: tags globales
+    tags:
+      - name: Appointments
+        description: Endpoints para manejo de citas
 functions:
   appointmentApi:
     handler: src/lambdas/appointment_api.handler
     # Sin VPC: solo usa DynamoDB y SNS (servicios públicos)
     events:
-      - httpApi:
-          method: POST
+      - http: # <-- usar "http" (REST) en vez de "httpApi"
+          method: post
           path: /appointments
-      - httpApi:
-          method: GET
+          cors: true
+          
+          documentation:
+            summary: Crear una cita (se guarda en pending y publica evento)
+            description: Recibe insuredId, scheduleId y countryISO. Guarda en Dynamo y publica evento.
+            tags:
+              - Appointments
+            requestBody:
+              description: Nuevo appointment
+              required: true
+              content:
+                application/json:
+                  schema:
+                    $ref: "#/components/schemas/NewAppointment"
+            responses:
+              - statusCode: 201
+                description: Creado
+                content: # <-- Usar 'content' en lugar de 'bodyType'
+                  application/json:
+                    schema:
+                      $ref: "#/components/schemas/AppointmentCreatedResponse"
+              - statusCode: 400
+                description: Petición inválida
+              - statusCode: 500
+                description: Error interno
+
+      - http:
+          method: get
           path: /appointments/{insuredId}
+          cors: true
+          documentation:
+            summary: Listar citas por insuredId
+            tags:
+              - Appointments
+            parameters:
+              - name: insuredId
+                in: path
+                required: true
+                description: Identificador del asegurado (5 dígitos)
+                schema:
+                  type: string
 
   appointmentConfirm:
     handler: src/lambdas/appointment_confirm.handler
@@ -218,7 +309,6 @@ resources:
               Principal: "*"
               Action: "secretsmanager:*"
               Resource: "*"
-
 
     # ------------------- DynamoDB --------------------
     AppointmentsTable:
@@ -367,7 +457,7 @@ resources:
                         - ${self:provider.environment.EVENT_BUS_NAME}
                         - "/"
                         - ${self:service}-${self:provider.stage}-EventToConfirmedQueueRule
-                        - "*"  # Wildcard para el hash que CloudFormation agrega
+                        - "*" # Wildcard para el hash que CloudFormation agrega
 
   Outputs:
     LambdaSecurityGroupId:

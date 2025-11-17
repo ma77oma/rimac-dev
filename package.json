@@ -6,7 +6,10 @@
     "dev": "serverless offline --stage local",
     "deploy": "serverless deploy --stage dev",
     "remove": "serverless remove --stage dev",
-    "print": "serverless print --stage dev"
+    "print": "serverless print --stage dev",
+    "openapi:generate": "npx serverless openapi generate",
+    "openapi:validate": "npx swagger-cli validate ./openapi.yml",
+    "swagger:serve": "node scripts/swagger-server.js"
   },
   "keywords": [],
   "author": "",
@@ -32,6 +35,7 @@
     "serverless-dotenv-plugin": "^6.0.0",
     "serverless-esbuild": "^1.55.1",
     "serverless-offline": "^13.9.0",
+    "serverless-openapi-documentation": "^0.4.0",
     "ts-jest": "^29.4.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
